@@ -71,7 +71,7 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
             'device_name' => ['nullable', 'string', 'max:100'],
         ]);
-
+        
         if ($validator->fails()) {
             return $this->apiResponse->error(
                 'Validation failed.',

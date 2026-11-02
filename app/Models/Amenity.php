@@ -3,32 +3,30 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Amenity extends Model
 {
     protected $fillable = [
         'name',
         'slug',
+        'amenity_group',
         'icon',
-        'description',
-        'sort_order',
         'is_active',
+        'sort_order',
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'is_active' => 'boolean',
-            'sort_order' => 'integer',
-        ];
-    }
+    protected $casts = [
+        'is_active' => 'boolean',
+        'sort_order' => 'integer',
+    ];
 
-    public function properties(): BelongsToMany
+    public function properties()
     {
         return $this->belongsToMany(
             Property::class,
-            'amenity_property'
-        )->withPivot('details')->withTimestamps();
+            'property_amenities',
+            'amenity_id',
+            'property_id'
+        )->withTimestamps();
     }
 }

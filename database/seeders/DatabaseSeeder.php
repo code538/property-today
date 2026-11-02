@@ -10,7 +10,9 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             WebsiteSettingSeeder::class,
-            PropertyTypeSeeder::class,
+            PropertyCategorySeeder::class,
+            AmenitySeeder::class,
+            PropertyCategoryMenuSeeder::class,
         ]);
     }
 }

@@ -29,7 +29,7 @@ class AuthService
     public function login(array $data): ?array
     {
         $user = User::where('email', $data['email'])->first();
-
+        //dd($user);
         if (
             ! $user ||
             ! Hash::check($data['password'], $user->password)

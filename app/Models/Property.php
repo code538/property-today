@@ -4,27 +4,23 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Property extends Model
 {
     use SoftDeletes;
 
     protected $fillable = [
-        'listing_code',
-        'slug',
         'user_id',
-        'property_type_id',
-        'title',
-        'description',
+        'property_category_id',
         'listing_type',
+        'title',
+        'slug',
+        'description',
         'price',
         'price_negotiable',
+        'price_period',
         'maintenance_charge',
         'security_deposit',
-        'price_period',
         'built_up_area',
         'carpet_area',
         'plot_area',
@@ -32,100 +28,89 @@ class Property extends Model
         'bedrooms',
         'bathrooms',
         'balconies',
+        'furnishing_status',
         'floor_number',
         'total_floors',
-        'furnishing_status',
-        'property_condition',
-        'facing_direction',
-        'year_built',
+        'property_age',
         'possession_status',
-        'total_rooms',
-        'available_rooms',
-        'total_beds',
-        'available_beds',
-        'tenant_preference',
-        'address_line_1',
-        'address_line_2',
-        'locality',
-        'landmark',
-        'city',
-        'district',
-        'state',
-        'country',
-        'postal_code',
-        'latitude',
-        'longitude',
-        'contact_name',
-        'contact_phone',
-        'show_owner_name',
+        'available_from',
         'status',
-        'approved_by',
-        'approved_at',
-        'rejection_reason',
-        'published_at',
-        'expires_at',
         'is_featured',
-        'featured_until',
-        'view_count',
+        'views_count',
+        'meta_title',
+        'meta_description',
+        'published_at',
     ];
 
-    protected function casts(): array
-    {
-        return [
-            'price' => 'decimal:2',
-            'maintenance_charge' => 'decimal:2',
-            'security_deposit' => 'decimal:2',
-            'built_up_area' => 'decimal:2',
-            'carpet_area' => 'decimal:2',
-            'plot_area' => 'decimal:2',
-            'latitude' => 'decimal:7',
-            'longitude' => 'decimal:7',
-            'price_negotiable' => 'boolean',
-            'show_owner_name' => 'boolean',
-            'is_featured' => 'boolean',
-            'approved_at' => 'datetime',
-            'published_at' => 'datetime',
-            'expires_at' => 'datetime',
-            'featured_until' => 'datetime',
-            'view_count' => 'integer',
-        ];
-    }
+    protected $casts = [
+        'price' => 'decimal:2',
+        'price_negotiable' => 'boolean',
+        'maintenance_charge' => 'decimal:2',
+        'security_deposit' => 'decimal:2',
+        'built_up_area' => 'decimal:2',
+        'carpet_area' => 'decimal:2',
+        'plot_area' => 'decimal:2',
+        'bedrooms' => 'integer',
+        'bathrooms' => 'integer',
+        'balconies' => 'integer',
+        'is_featured' => 'boolean',
+        'views_count' => 'integer',
+        'available_from' => 'date',
+        'published_at' => 'datetime',
+    ];
 
-    public function user(): BelongsTo
+    // Property owner
+    public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    public function propertyType(): BelongsTo
-    {
-        return $this->belongsTo(PropertyType::class);
-    }
-
-    public function approver(): BelongsTo
+    // Property category
+    public function category()
     {
         return $this->belongsTo(
-            User::class,
-            'approved_by'
+            PropertyCategory::class,
+            'property_category_id'
         );
     }
 
-    public function images(): HasMany
+    // Property images and videos
+    public function media()
     {
-        return $this->hasMany(PropertyImage::class)
-            ->orderBy('sort_order');
+        return $this->hasMany(
+            PropertyMedia::class,
+            'property_id'
+        )->orderBy('sort_order');
     }
 
-    public function primaryImage(): HasMany
+    // Property location
+    public function location()
     {
-        return $this->hasMany(PropertyImage::class)
-            ->where('is_primary', true);
+        return $this->hasOne(
+            PropertyLocation::class,
+            'property_id'
+        );
     }
 
-    public function amenities(): BelongsToMany
+    // Property amenities
+    public function amenities()
     {
         return $this->belongsToMany(
             Amenity::class,
-            'amenity_property'
-        )->withPivot('details')->withTimestamps();
+            'property_amenities',
+            'property_id',
+            'amenity_id'
+        );
     }
+
+    // Additional property details
+    public function details()
+    {
+        return $this->hasOne(
+            PropertyDetail::class,
+            'property_id'
+        );
+    }
+
+  
 }

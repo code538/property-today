@@ -30,7 +30,7 @@ class WebsiteSettingController extends Controller
     // Update website settings (admin only)
    
     public function update(Request $request)
-    {
+    {   //dd($request->user()?->role);
         if ($request->user()?->role !== 'admin') {
             return $this->apiResponse->error(
                 'You are not authorized to update website settings.',
@@ -38,7 +38,7 @@ class WebsiteSettingController extends Controller
                 403
             );
         }
-
+        //dd($request->all());
         $validator = Validator::make($request->all(), [
             // Company
             'company_name' => ['sometimes', 'required', 'string', 'max:255'],
@@ -100,7 +100,7 @@ class WebsiteSettingController extends Controller
         }
 
         $validated = $validator->validated();
-
+        //dd($validated);
         // Separate uploaded files from regular database fields.
         $fileFields = [
             'logo_web',

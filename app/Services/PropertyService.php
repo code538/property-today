@@ -3,301 +3,288 @@
 namespace App\Services;
 
 use App\Models\Property;
-use App\Models\PropertyImage;
-use App\Models\User;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Http\UploadedFile;
+use App\Models\PropertyMedia;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class PropertyService
 {
-    public function getPublishedProperties(
-        array $filters = []
-    ): LengthAwarePaginator {
-        $query = Property::query()
-            ->where('status', 'published')
-            ->where(function ($q) {
-                $q->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
-            })
-            ->with([
-                'propertyType',
-                'images',
-                'amenities',
-                'user:id,name',
-            ]);
-
-        if (!empty($filters['search'])) {
-            $search = $filters['search'];
-
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%")
-                    ->orWhere('locality', 'like', "%{$search}%")
-                    ->orWhere('city', 'like', "%{$search}%");
-            });
-        }
-
-        foreach ([
-            'property_type_id',
-            'listing_type',
-            'city',
-            'state',
-        ] as $field) {
-            if (!empty($filters[$field])) {
-                $query->where($field, $filters[$field]);
-            }
-        }
-
-        if (isset($filters['min_price'])) {
-            $query->where('price', '>=', $filters['min_price']);
-        }
-
-        if (isset($filters['max_price'])) {
-            $query->where('price', '<=', $filters['max_price']);
-        }
-
-        if (isset($filters['bedrooms'])) {
-            $query->where(
-                'bedrooms',
-                '>=',
-                $filters['bedrooms']
-            );
-        }
-
-        // Nearby search using the Haversine formula.
-        if (
-            isset($filters['latitude'], $filters['longitude'])
-        ) {
-            $lat = (float) $filters['latitude'];
-            $lng = (float) $filters['longitude'];
-            $radius = (float) ($filters['radius_km'] ?? 10);
-
-            $distanceSql = '
-                (6371 * ACOS(
-                    LEAST(1, GREATEST(-1,
-                        COS(RADIANS(?))
-                        * COS(RADIANS(latitude))
-                        * COS(RADIANS(longitude) - RADIANS(?))
-                        + SIN(RADIANS(?))
-                        * SIN(RADIANS(latitude))
-                    ))
-                ))
-            ';
-
-            $query->whereNotNull('latitude')
-                ->whereNotNull('longitude')
-                ->whereRaw(
-                    $distanceSql . ' <= ?',
-                    [$lat, $lng, $lat, $radius]
-                )
-                ->select('properties.*')
-                ->selectRaw(
-                    $distanceSql . ' AS distance_km',
-                    [$lat, $lng, $lat]
-                )
-                ->orderBy('distance_km');
-        } else {
-            $query->orderByDesc('is_featured')
-                ->orderByDesc('published_at');
-        }
-
-        return $query->paginate(
-            min(max((int) ($filters['per_page'] ?? 12), 1), 100)
-        );
-    }
-
-    public function getProperty(int $id): Property
+    /**
+     * Create property with related records.
+     */
+    public function createProperty(array $data, Request $request, $user): Property
     {
-        return Property::with([
-            'propertyType',
-            'images',
-            'amenities',
-            'user:id,name',
-        ])
-            ->where('status', 'published')
-            ->where(function ($q) {
-                $q->whereNull('expires_at')
-                    ->orWhere('expires_at', '>', now());
-            })
-            ->findOrFail($id);
-    }
+        DB::beginTransaction();
 
-    public function getMyProperties(
-        User $user,
-        int $perPage = 12
-    ): LengthAwarePaginator {
-        return Property::where('user_id', $user->id)
-            ->with(['propertyType', 'images', 'amenities'])
-            ->latest()
-            ->paginate(min(max($perPage, 1), 100));
-    }
+        try {
+            $propertyData = collect($data)->except([
+                'location',
+                'details',
+                'amenity_ids',
+                'images',
+                'videos',
+            ])->toArray();
 
-    public function create(
-        User $user,
-        array $data
-    ): Property {
-        return DB::transaction(function () use ($user, $data) {
-            $this->checkListingLimit($user);
+            $propertyData['user_id'] = $user->id;
+            $propertyData['slug'] = $this->generateSlug($data['title']);
+            $propertyData['status'] = 'pending';
+            $propertyData['price_negotiable'] = $data['price_negotiable'] ?? false;
+            $propertyData['area_unit'] = $data['area_unit'] ?? 'sqft';
+            $propertyData['meta_title'] = $data['meta_title'] ?? $data['title'];
 
-            $images = $data['images'] ?? [];
-            $amenityIds = $data['amenity_ids'] ?? [];
+            $property = Property::create($propertyData);
 
-            unset($data['images'], $data['amenity_ids']);
+            // Save location.
+            if (!empty($data['location'])) {
+                $property->location()->create($data['location']);
+            }
 
-            $data['user_id'] = $user->id;
+            // Save additional details.
+            if (!empty($data['details'])) {
+                $property->details()->create($data['details']);
+            }
 
-            // Never trust client-supplied moderation fields.
-            $data['status'] = 'pending';
-            $data['is_featured'] = false;
-            $data['approved_by'] = null;
-            $data['approved_at'] = null;
-            $data['published_at'] = null;
+            // Save amenities.
+            if (!empty($data['amenity_ids'])) {
+                $property->amenities()->sync($data['amenity_ids']);
+            }
 
-            $data['listing_code'] = 'PT-'
-                . now()->format('Y')
-                . '-'
-                . strtoupper(Str::random(8));
+            // Upload images and videos.
+            $this->uploadMedia($request, $property);
 
-            $data['slug'] = Str::slug($data['title'])
-                . '-'
-                . Str::lower(Str::random(8));
-
-            $property = Property::create($data);
-
-            $this->storeImages($property, $images);
-
-            $property->amenities()->sync($amenityIds);
+            DB::commit();
 
             return $property->load([
-                'propertyType',
-                'images',
+                'category',
+                'media',
+                'location',
                 'amenities',
-                'user:id,name',
+                'details',
+                'user',
             ]);
-        });
+
+        } catch (Throwable $e) {
+            DB::rollBack();
+
+            // Remove uploaded files if database operation fails.
+            if (isset($property)) {
+                $this->deleteMediaFiles($property);
+            }
+
+            throw $e;
+        }
     }
 
-    public function update(
+    /**
+     * Update property with related records.
+     */
+    public function updateProperty(
         Property $property,
-        array $data
+        array $data,
+        Request $request
     ): Property {
-        return DB::transaction(function () use ($property, $data) {
-            $images = $data['images'] ?? [];
-            $amenityIds = $data['amenity_ids'] ?? null;
+        DB::beginTransaction();
 
-            unset($data['images'], $data['amenity_ids']);
+        try {
+            $propertyData = collect($data)->except([
+                'location',
+                'details',
+                'amenity_ids',
+                'images',
+                'videos',
+            ])->toArray();
 
-            // Clients cannot approve or publish their own listings.
-            unset(
-                $data['user_id'],
-                $data['listing_code'],
-                $data['status'],
-                $data['approved_by'],
-                $data['approved_at'],
-                $data['published_at'],
-                $data['is_featured'],
-                $data['featured_until']
-            );
-
-            $property->update($data);
-
-            if (!empty($images)) {
-                $this->storeImages($property, $images);
+            if (isset($data['title'])) {
+                $propertyData['slug'] = $this->generateSlug(
+                    $data['title'],
+                    $property->id
+                );
             }
 
-            if ($amenityIds !== null) {
-                $property->amenities()->sync($amenityIds);
+            if (!empty($propertyData)) {
+                $propertyData['status'] = 'pending';
+                $propertyData['published_at'] = null;
+
+                $property->update($propertyData);
             }
+
+            // Update location.
+            if (isset($data['location'])) {
+                $property->location()->updateOrCreate(
+                    ['property_id' => $property->id],
+                    $data['location']
+                );
+            }
+
+            // Update additional details.
+            if (isset($data['details'])) {
+                $property->details()->updateOrCreate(
+                    ['property_id' => $property->id],
+                    $data['details']
+                );
+            }
+
+            // Update amenities.
+            if (isset($data['amenity_ids'])) {
+                $property->amenities()->sync($data['amenity_ids']);
+            }
+
+            // Upload new media.
+            $this->uploadMedia($request, $property);
+
+            DB::commit();
 
             return $property->fresh()->load([
-                'propertyType',
-                'images',
+                'category',
+                'media',
+                'location',
                 'amenities',
-                'user:id,name',
+                'details',
+                'user',
             ]);
-        });
+
+        } catch (Throwable $e) {
+            DB::rollBack();
+
+            throw $e;
+        }
     }
 
-    public function delete(Property $property): void
+    /**
+     * Delete property and its media files.
+     */
+    public function deleteProperty(Property $property): bool
     {
-        DB::transaction(function () use ($property) {
-            // Soft deletion preserves the listing and its image records.
+        DB::beginTransaction();
+
+        try {
+            $this->deleteMediaFiles($property);
+
+            // Soft delete property.
             $property->delete();
-        });
+
+            DB::commit();
+
+            return true;
+
+        } catch (Throwable $e) {
+            DB::rollBack();
+
+            throw $e;
+        }
     }
 
-    private function checkListingLimit(User $user): void
+    /**
+     * Generate unique property slug.
+     */
+    public function generateSlug(string $title, ?int $ignoreId = null): string
     {
-        // Admins are not subject to ordinary listing limits.
-        if ($user->role === 'admin') {
-            return;
+        $baseSlug = Str::slug($title);
+
+        if ($baseSlug === '') {
+            $baseSlug = 'property';
         }
 
-        $limits = [
-            'user' => 1,
-            'agent' => 5,
-        ];
+        $slug = $baseSlug;
+        $counter = 1;
 
-        $limit = $limits[$user->role] ?? 0;
-
-        $count = Property::where('user_id', $user->id)
-            ->whereNotIn('status', [
-                'archived',
-                'sold',
-                'rented',
-            ])
-            ->count();
-
-        if ($count >= $limit) {
-            throw ValidationException::withMessages([
-                'subscription' => [
-                    "Your current listing limit is {$limit}. Upgrade your plan to list more properties.",
-                ],
-            ]);
+        while (
+            Property::where('slug', $slug)
+                ->when($ignoreId, function ($query) use ($ignoreId) {
+                    $query->where('id', '!=', $ignoreId);
+                })
+                ->exists()
+        ) {
+            $slug = $baseSlug . '-' . $counter;
+            $counter++;
         }
+
+        return $slug;
     }
 
-    private function storeImages(
-        Property $property,
-        array $images
-    ): void {
+    /**
+     * Upload property images and videos.
+     */
+    public function uploadMedia(Request $request, Property $property): void
+    {
+        $images = $request->file('images', []);
+
         foreach ($images as $index => $image) {
+
             $webPath = Storage::disk('public')->putFile(
-                'properties/images',
-                $image['image_web']
+                "properties/{$property->id}/web",
+                $image['web_image']
             );
 
             $mobilePath = null;
-            $videoPath = null;
 
-            if (!empty($image['image_mobile'])) {
+            if (!empty($image['mobile_image'])) {
                 $mobilePath = Storage::disk('public')->putFile(
-                    'properties/images/mobile',
-                    $image['image_mobile']
+                    "properties/{$property->id}/mobile",
+                    $image['mobile_image']
                 );
             }
 
-            if (!empty($image['video'])) {
-                $videoPath = Storage::disk('public')->putFile(
-                    'properties/videos',
-                    $image['video']
-                );
-            }
-
-            PropertyImage::create([
+            PropertyMedia::create([
                 'property_id' => $property->id,
-                'image_web_path' => $webPath,
-                'image_mobile_path' => $mobilePath,
+                'media_type' => 'image',
+                'file_path' => $webPath,
+                'mobile_file_path' => $mobilePath,
                 'image_alt' => $image['image_alt'] ?? null,
-                'video_path' => $videoPath,
+                'mime_type' => $image['web_image']->getMimeType(),
+                'file_size' => $image['web_image']->getSize(),
+                'is_primary' => !$property->media()
+                    ->where('media_type', 'image')
+                    ->exists() && $index === 0,
                 'sort_order' => $index,
-                'is_primary' => $index === 0
-                    && !$property->images()->exists(),
             ]);
+        }
+
+        // Upload videos.
+        $videos = $request->file('videos', []);
+
+        foreach ($videos as $index => $video) {
+
+            $videoPath = Storage::disk('public')->putFile(
+                "properties/{$property->id}/videos",
+                $video
+            );
+
+            PropertyMedia::create([
+                'property_id' => $property->id,
+                'media_type' => 'video',
+                'file_path' => $videoPath,
+                'mobile_file_path' => null,
+                'image_alt' => null,
+                'mime_type' => $video->getMimeType(),
+                'file_size' => $video->getSize(),
+                'is_primary' => false,
+                'sort_order' => $index,
+            ]);
+        }
+    }
+
+    /**
+     * Delete all property media files from storage.
+     */
+    public function deleteMediaFiles(Property $property): void
+    {
+        $mediaItems = $property->media()->get();
+
+        foreach ($mediaItems as $media) {
+
+            if ($media->file_path) {
+                Storage::disk('public')->delete($media->file_path);
+            }
+
+            if ($media->mobile_file_path) {
+                Storage::disk('public')->delete($media->mobile_file_path);
+            }
+
+            $media->delete();
         }
     }
 }

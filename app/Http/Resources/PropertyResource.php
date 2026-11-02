@@ -4,100 +4,141 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class PropertyResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
         return [
+            // Basic property information
             'id' => $this->id,
-            'listing_code' => $this->listing_code,
-            'slug' => $this->slug,
-
             'title' => $this->title,
+            'slug' => $this->slug,
             'description' => $this->description,
 
-            'property_type' => $this->whenLoaded(
-                'propertyType',
-                fn () => [
-                    'id' => $this->propertyType->id,
-                    'name' => $this->propertyType->name,
-                    'slug' => $this->propertyType->slug,
-                ]
-            ),
-
+            // Listing information
             'listing_type' => $this->listing_type,
             'price' => $this->price,
-            'price_negotiable' => $this->price_negotiable,
+            'price_negotiable' => (bool) $this->price_negotiable,
+            'price_period' => $this->price_period,
             'maintenance_charge' => $this->maintenance_charge,
             'security_deposit' => $this->security_deposit,
-            'price_period' => $this->price_period,
 
-            'area' => [
-                'built_up' => $this->built_up_area,
-                'carpet' => $this->carpet_area,
-                'plot' => $this->plot_area,
-                'unit' => $this->area_unit,
-            ],
+            // Property area
+            'built_up_area' => $this->built_up_area,
+            'carpet_area' => $this->carpet_area,
+            'plot_area' => $this->plot_area,
+            'area_unit' => $this->area_unit,
 
-            'rooms' => [
-                'bedrooms' => $this->bedrooms,
-                'bathrooms' => $this->bathrooms,
-                'balconies' => $this->balconies,
-                'floor_number' => $this->floor_number,
-                'total_floors' => $this->total_floors,
-                'total_rooms' => $this->total_rooms,
-                'available_rooms' => $this->available_rooms,
-                'total_beds' => $this->total_beds,
-                'available_beds' => $this->available_beds,
-            ],
+            // Property specifications
+            'bedrooms' => $this->bedrooms,
+            'bathrooms' => $this->bathrooms,
+            'balconies' => $this->balconies,
+            'furnishing_status' => $this->furnishing_status,
+            'floor_number' => $this->floor_number,
+            'total_floors' => $this->total_floors,
+            'property_age' => $this->property_age,
+            'possession_status' => $this->possession_status,
+            'available_from' => $this->available_from?->format('Y-m-d'),
 
-            'details' => [
-                'furnishing_status' => $this->furnishing_status,
-                'property_condition' => $this->property_condition,
-                'facing_direction' => $this->facing_direction,
-                'year_built' => $this->year_built,
-                'possession_status' => $this->possession_status,
-                'tenant_preference' => $this->tenant_preference,
-            ],
+            // Category
+            'category' => new PropertyCategoryResource(
+                $this->whenLoaded('category')
+            ),
 
-            'location' => [
-                'address_line_1' => $this->address_line_1,
-                'address_line_2' => $this->address_line_2,
-                'locality' => $this->locality,
-                'landmark' => $this->landmark,
-                'city' => $this->city,
-                'district' => $this->district,
-                'state' => $this->state,
-                'country' => $this->country,
-                'postal_code' => $this->postal_code,
-                'latitude' => $this->latitude,
-                'longitude' => $this->longitude,
-            ],
-
-            // Do not expose contact numbers in public responses.
-            'owner' => $this->whenLoaded(
-                'user',
-                fn () => [
+            // Owner information
+            'owner' => $this->whenLoaded('user', function () {
+                return [
                     'id' => $this->user->id,
-                    'name' => $this->show_owner_name
-                        ? $this->user->name
-                        : null,
-                ]
-            ),
+                    'name' => $this->user->name,
+                    'user_type' => $this->user->user_type ?? null,
+                ];
+            }),
 
-            'images' => PropertyImageResource::collection(
-                $this->whenLoaded('images')
-            ),
+            // Property media
+            'media' => $this->whenLoaded('media', function () {
+                return $this->media->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'media_type' => $item->media_type,
+                        'file_path' => $item->file_path,
+                        'web_url' => $item->file_path
+                            ? Storage::disk('public')->url($item->file_path)
+                            : null,
+                        'mobile_file_path' => $item->mobile_file_path,
+                        'mobile_url' => $item->mobile_file_path
+                            ? Storage::disk('public')->url($item->mobile_file_path)
+                            : null,
+                        'video_url' => $item->media_type === 'video' && $item->file_path
+                            ? Storage::disk('public')->url($item->file_path)
+                            : null,
+                        'image_alt' => $item->image_alt,
+                        'mime_type' => $item->mime_type,
+                        'file_size' => $item->file_size,
+                        'is_primary' => (bool) $item->is_primary,
+                        'sort_order' => $item->sort_order,
+                    ];
+                });
+            }),
 
-            'amenities' => AmenityResource::collection(
-                $this->whenLoaded('amenities')
-            ),
+            // Property location
+            'location' => $this->whenLoaded('location', function () {
+                return [
+                    'country' => $this->location->country,
+                    'state' => $this->location->state,
+                    'city' => $this->location->city,
+                    'locality' => $this->location->locality,
+                    'pincode' => $this->location->pincode,
+                    'address' => $this->location->address,
+                    'landmark' => $this->location->landmark,
+                    'latitude' => $this->location->latitude,
+                    'longitude' => $this->location->longitude,
+                ];
+            }),
 
-            'status' => $this->status,
-            'is_featured' => $this->is_featured,
-            'published_at' => $this->published_at?->toISOString(),
-            'created_at' => $this->created_at?->toISOString(),
+            // Amenities
+            'amenities' => $this->whenLoaded('amenities', function () {
+                return $this->amenities->map(function ($amenity) {
+                    return [
+                        'id' => $amenity->id,
+                        'name' => $amenity->name,
+                        'slug' => $amenity->slug,
+                        'amenity_group' => $amenity->amenity_group,
+                        'icon' => $amenity->icon,
+                    ];
+                });
+            }),
+
+            // Additional category-specific details
+            'details' => $this->whenLoaded('details', function () {
+                return [
+                    'plot_length' => $this->details->plot_length,
+                    'plot_width' => $this->details->plot_width,
+                    'facing' => $this->details->facing,
+                    'road_width' => $this->details->road_width,
+                    'sharing_type' => $this->details->sharing_type,
+                    'total_beds' => $this->details->total_beds,
+                    'available_beds' => $this->details->available_beds,
+                    'food_available' => $this->details->food_available,
+                    'office_type' => $this->details->office_type,
+                    'number_of_cabins' => $this->details->number_of_cabins,
+                    'number_of_washrooms' => $this->details->number_of_washrooms,
+                    'attributes' => $this->details->attributes,
+                ];
+            }),
+
+            // SEO
+            'seo' => [
+                'meta_title' => $this->meta_title,
+                'meta_description' => $this->meta_description,
+            ],
+
+            // Additional information
+            'is_featured' => (bool) $this->is_featured,
+            'views_count' => $this->views_count,
+            'published_at' => $this->published_at?->toDateTimeString(),
+            'created_at' => $this->created_at?->toDateTimeString(),
         ];
     }
 }
