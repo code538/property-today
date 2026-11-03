@@ -62,16 +62,16 @@ class PropertyResource extends JsonResource
                     return [
                         'id' => $item->id,
                         'media_type' => $item->media_type,
-                        'file_path' => $item->file_path,
+                        'file_path' => 'storage/app/public/'.$item->file_path,
                         'web_url' => $item->file_path
-                            ? Storage::disk('public')->url($item->file_path)
+                            ? Storage::disk('app/public')->url($item->file_path)
                             : null,
-                        'mobile_file_path' => $item->mobile_file_path,
+                        'mobile_file_path' => 'storage/app/public/'.$item->mobile_file_path,
                         'mobile_url' => $item->mobile_file_path
-                            ? Storage::disk('public')->url($item->mobile_file_path)
+                            ? Storage::disk('app/public')->url($item->mobile_file_path)
                             : null,
                         'video_url' => $item->media_type === 'video' && $item->file_path
-                            ? Storage::disk('public')->url($item->file_path)
+                            ? Storage::disk('app/public')->url($item->file_path)
                             : null,
                         'image_alt' => $item->image_alt,
                         'mime_type' => $item->mime_type,
