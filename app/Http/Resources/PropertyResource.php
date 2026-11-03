@@ -57,22 +57,32 @@ class PropertyResource extends JsonResource
             }),
 
             // Property media
+           
             'media' => $this->whenLoaded('media', function () {
                 return $this->media->map(function ($item) {
+
                     return [
                         'id' => $item->id,
                         'media_type' => $item->media_type,
+
+                        // Relative storage path
                         'file_path' => 'storage/app/public/'.$item->file_path,
+
+                        // Public web URL
                         'web_url' => $item->file_path
-                            ? Storage::disk('app/public')->url($item->file_path)
+                            ? Storage::disk('public')->url($item->file_path)
                             : null,
+
                         'mobile_file_path' => 'storage/app/public/'.$item->mobile_file_path,
+
                         'mobile_url' => $item->mobile_file_path
-                            ? Storage::disk('app/public')->url($item->mobile_file_path)
+                            ? Storage::disk('public')->url($item->mobile_file_path)
                             : null,
+
                         'video_url' => $item->media_type === 'video' && $item->file_path
-                            ? Storage::disk('app/public')->url($item->file_path)
+                            ? Storage::disk('public')->url($item->file_path)
                             : null,
+
                         'image_alt' => $item->image_alt,
                         'mime_type' => $item->mime_type,
                         'file_size' => $item->file_size,
@@ -81,6 +91,7 @@ class PropertyResource extends JsonResource
                     ];
                 });
             }),
+
 
             // Property location
             'location' => $this->whenLoaded('location', function () {
