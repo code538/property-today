@@ -66,14 +66,14 @@ class PropertyResource extends JsonResource
                         'media_type' => $item->media_type,
 
                         // Relative storage path
-                        'file_path' => 'storage/app/public/'.$item->file_path,
+                        'file_path' => '/storage/app/public/'.$item->file_path,
 
                         // Public web URL
                         'web_url' => $item->file_path
                             ? Storage::disk('public')->url($item->file_path)
                             : null,
 
-                        'mobile_file_path' => 'storage/app/public/'.$item->mobile_file_path,
+                        'mobile_file_path' => '/storage/app/public/'.$item->mobile_file_path,
 
                         'mobile_url' => $item->mobile_file_path
                             ? Storage::disk('public')->url($item->mobile_file_path)
